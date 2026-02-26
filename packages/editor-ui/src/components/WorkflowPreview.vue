@@ -1,0 +1,282 @@
+<template>
+	<div :class="$style.container">
+		<div v-if="loaderType === 'image' && !showPreview" :class="$style.imageLoader">
+			<n8n-loading :loading="!showPreview" :rows="1" variant="image" />
+		</div>
+		<div v-else-if="loaderType === 'spinner' && !showPreview" :class="$style.spinner">
+			<n8n-spinner type="dots" />
+		</div>
+		<iframe
+			:class="{
+				[$style.workflow]: !this.nodeViewDetailsOpened,
+				[$style.executionPreview]: mode === 'execution',
+				// [$style.openNDV]: this.nodeViewDetailsOpened,
+				[$style.show]: this.showPreview,
+			}"
+			ref="preview_iframe"
+			:src="src"
+			@mouseenter="onMouseEnter"
+			@mouseleave="onMouseLeave"
+		></iframe>
+	</div>
+</template>
+
+<script lang="ts">
+import mixins from 'vue-typed-mixins';
+import { showMessage } from '@/mixins/showMessage';
+import { IWorkflowDb } from '../Interface';
+import { mapStores } from 'pinia';
+import { useRootStore } from '@/stores/n8nRootStore';
+
+export default mixins(showMessage).extend({
+	name: 'WorkflowPreview',
+	props: {
+		loading: {
+			type: Boolean,
+			default: false,
+		},
+		mode: {
+			type: String,
+			default: 'workflow',
+			validator: (value: string): boolean => ['workflow', 'execution'].includes(value),
+		},
+		workflow: {
+			type: Object as () => IWorkflowDb,
+			required: false,
+		},
+		nodes: {
+			type: Array as () => Array<string | IUpdateInformation>,
+		},
+		executionId: {
+			type: String,
+			required: false,
+		},
+		executionMode: {
+			type: String,
+			required: false,
+		},
+		loaderType: {
+			type: String,
+			default: 'image',
+			validator: (value: string): boolean => ['image', 'spinner'].includes(value),
+		},
+	},
+	data() {
+		return {
+			nodeViewDetailsOpened: false,
+			ready: false,
+			insideIframe: false,
+			scrollX: 0,
+			scrollY: 0,
+		};
+	},
+	computed: {
+		...mapStores(useRootStore),
+		showPreview(): boolean {
+			return !this.loading && this.ready && !!this.nodes?.length;
+		},
+		src(): string {
+			return `${window.location.origin}/workflows/demo`;
+		},
+	},
+	methods: {
+		onMouseEnter() {
+			this.insideIframe = true;
+			this.scrollX = window.scrollX;
+			this.scrollY = window.scrollY;
+		},
+		onMouseLeave() {
+			this.insideIframe = false;
+		},
+		loadWorkflow() {
+			try {
+				// if (!this.workflow) {
+				// 	throw new Error(this.$locale.baseText('workflowPreview.showError.missingWorkflow'));
+				// }
+				// if (!this.workflow.nodes || !Array.isArray(this.workflow.nodes)) {
+				// 	throw new Error(this.$locale.baseText('workflowPreview.showError.arrayEmpty'));
+				// }
+
+				const iframe = this.$refs.preview_iframe as HTMLIFrameElement;
+				if (iframe.contentWindow && this.nodes) {
+					iframe.contentWindow.postMessage(
+						JSON.stringify({
+							command: 'openWorkflow',
+							workflow: this.nodes,
+						}),
+						'*',
+					);
+				}
+			} catch (error) {
+				this.$showError(
+					error,
+					this.$locale.baseText('workflowPreview.showError.previewError.title'),
+					this.$locale.baseText('workflowPreview.showError.previewError.message'),
+				);
+			}
+		},
+		loadExecution() {
+			try {
+				if (!this.executionId) {
+					throw new Error(this.$locale.baseText('workflowPreview.showError.missingExecution'));
+				}
+				const iframe = this.$refs.preview_iframe as HTMLIFrameElement;
+				if (iframe.contentWindow) {
+					iframe.contentWindow.postMessage(
+						JSON.stringify({
+							command: 'openExecution',
+							executionId: this.executionId,
+							executionMode: this.executionMode || '',
+						}),
+						'*',
+					);
+				}
+			} catch (error) {
+				this.$showError(
+					error,
+					this.$locale.baseText('workflowPreview.showError.previewError.title'),
+					this.$locale.baseText('workflowPreview.executionMode.showError.previewError.message'),
+				);
+			}
+		},
+		receiveMessage({ data }: MessageEvent) {
+			try {
+				const json = JSON.parse(data);
+				if (json.command === 'n8nReady') {
+					this.ready = true;
+				} else if (json.command === 'openNDV') {
+					this.$emit('open-ndv');
+					this.nodeViewDetailsOpened = true;
+				} else if (json.command === 'closeNDV') {
+					this.nodeViewDetailsOpened = false;
+				} else if (json.command === 'workflowSaved') {
+					this.$emit('workflow-saved', { id: json.id });
+				} else if (json.command === 'credFilled') {
+					this.$emit('cred-filled');
+				} else if (json.command === 'credConnected') {
+					this.$emit('cred-connected');
+				} else if (json.command === 'credUnFilled') {
+					this.$emit('cred-unfilled');
+				} else if (json.command === 'credSaved') {
+					this.$emit('cred-saved');
+				} else if (json.command === 'ranNode') {
+					this.$emit('ran-node');
+				} else if (json.command === 'newCred') {
+					this.$emit('new-cred');
+				} else if (json.command === 'error') {
+					this.$emit('close');
+				}
+			} catch (e) {}
+		},
+		onDocumentScroll() {
+			if (this.insideIframe) {
+				window.scrollTo(this.scrollX, this.scrollY);
+			}
+		},
+		save() {
+			const iframe = this.$refs.preview_iframe as HTMLIFrameElement;
+			if (iframe.contentWindow && this.nodes) {
+				iframe.contentWindow.postMessage(
+					JSON.stringify({
+						command: 'openWorkflow',
+						workflow: [
+							{
+								key: 'n8n-nodes-base.stickyNote',
+								name: 'Does not matter',
+								value: {
+									content:
+										'☝️  Any node connected to this Trigger can access it’s **On Event Created** output data.',
+									height: 80,
+									width: 283,
+									position: [130, 120],
+								},
+							},
+						],
+					}),
+					'*',
+				);
+			}
+
+			if (iframe.contentWindow) {
+				iframe.contentWindow.postMessage(
+					JSON.stringify({
+						command: 'saveWorkflow',
+					}),
+					'*',
+				);
+			}
+		},
+	},
+	watch: {
+		showPreview(show) {
+			if (show) {
+				if (this.mode === 'workflow') {
+					this.loadWorkflow();
+				} else if (this.mode === 'execution') {
+					this.loadExecution();
+				}
+			}
+		},
+		executionId(value) {
+			if (this.mode === 'execution' && this.executionId) {
+				this.loadExecution();
+			}
+		},
+	},
+	mounted() {
+		window.addEventListener('message', this.receiveMessage);
+		document.addEventListener('scroll', this.onDocumentScroll);
+	},
+	beforeDestroy() {
+		window.removeEventListener('message', this.receiveMessage);
+		document.removeEventListener('scroll', this.onDocumentScroll);
+	},
+});
+</script>
+
+<style lang="scss" module>
+.container {
+	width: 100%;
+	height: 100%;
+	display: flex;
+	justify-content: center;
+}
+
+.workflow {
+	// firefox bug requires loading iframe as such
+	visibility: hidden;
+	height: 0;
+	width: 0;
+}
+
+.show {
+	visibility: visible;
+	height: 100%;
+	width: 100%;
+}
+
+.openNDV {
+	position: fixed;
+	top: 0;
+	left: 0;
+	height: 100%;
+	width: 100%;
+	z-index: 9999999;
+}
+
+.spinner {
+	color: var(--color-primary);
+	position: absolute;
+	top: 50% !important;
+	-ms-transform: translateY(-50%);
+	transform: translateY(-50%);
+}
+
+.imageLoader {
+	width: 100%;
+}
+
+.executionPreview {
+	height: 100%;
+}
+</style>
