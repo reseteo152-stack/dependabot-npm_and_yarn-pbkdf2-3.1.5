@@ -1,0 +1,35 @@
+import {
+	IDataObject,
+	INodeProperties
+} from 'n8n-workflow';
+
+import {
+	groups,
+} from './Json/Groups';
+
+const finalGroups = {
+	displayName: 'Resource',
+	name: 'group',
+	type: 'options',
+	// eslint-disable-next-line n8n-nodes-base/node-param-default-wrong-for-options
+	default: 'communication',
+	description: 'The Resource to consume.',
+	options: [],
+};
+
+const options = [];
+
+for (const group of (groups as IDataObject).groups as IDataObject[]) {
+	const item = {
+		name: group.translated,
+		value: group.name,
+		description: 'The ' + group.translated + ' Resource allows you to get tools from this resource',
+	};
+	options.push(item);
+}
+
+//@ts-ignore
+finalGroups.options = options;
+const mappedGroups = [finalGroups];
+
+export const groupOptions = mappedGroups as INodeProperties[];
