@@ -1,0 +1,9 @@
+@use './fonts.scss';
+
+@use '../src/css/base.scss';
+@use '../src/css/reset.scss';
+@use '../src/css/index.scss';
+
+.multi-container > * {
+	margin-bottom: 10px;
+}
