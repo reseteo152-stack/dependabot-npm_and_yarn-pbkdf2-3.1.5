@@ -1,0 +1,764 @@
+<template>
+	<div class="record-locator">
+		<ResourceLocatorDropdown
+			:show="showResourceDropdown"
+			:selected="value ? value.value: ''"
+			:filterable="isSearcabale"
+			:filterRequired="requiresSearchFilter"
+			:resources="currentQueryResults"
+			:loading="currentQueryLoading"
+			:filter="searchFilter"
+			:hasMore="currentQueryHasMore"
+			:errorView="currentQueryError"
+			@hide="onDropdownHide"
+			@selected="onListItemSelected"
+			@filter="onSearchFilter"
+			@loadMore="loadResourcesDeboucned"
+			ref="dropdown"
+		>
+			<template #error>
+				<div :class="$style.error">
+					<n8n-text color="text-dark" align="center" tag="div">
+						{{ $locale.baseText('resourceLocator.listModeDropdown.error.title') }}
+					</n8n-text>
+					<n8n-text size="small" color="text-base" v-if="hasCredential">
+						{{ $locale.baseText('resourceLocator.listModeDropdown.error.description1') }}
+						<a @click="openCredential">{{
+							$locale.baseText('resourceLocator.listModeDropdown.error.description2')
+						}}</a>
+						{{ $locale.baseText('resourceLocator.listModeDropdown.error.description3') }}
+					</n8n-text>
+				</div>
+			</template>
+			<div
+				:class="{
+					[$style['resource-locator']]: true,
+					[$style['multiple-modes']]: hasMultipleModes,
+				}"
+			>
+				<div v-if="hasMultipleModes" :class="$style['mode-selector']">
+					<n8n-select
+						:value="selectedMode"
+						filterable
+						:size="inputSize"
+						:disabled="isReadOnly"
+						@change="onModeSelected"
+					>
+						<n8n-option
+							v-for="mode in parameter.modes"
+							:key="mode.name"
+							:label="$locale.baseText(getModeLabel(mode.name)) || mode.displayName"
+							:value="mode.name"
+							:disabled="isValueExpression && mode.name === 'list'"
+							:title="
+								isValueExpression && mode.name === 'list'
+									? $locale.baseText('resourceLocator.modeSelector.listMode.disabled.title')
+									: ''
+							"
+						>
+						</n8n-option>
+					</n8n-select>
+				</div>
+
+				<div :class="$style['input-container']">
+					<DraggableTarget
+						type="mapping"
+						:disabled="hasOnlyListMode"
+						:sticky="true"
+						:stickyOffset="4"
+						@drop="onDrop"
+					>
+						<template v-slot="{ droppable, activeDrop }">
+							<div
+								:class="{
+									...inputClasses,
+									[$style['droppable']]: droppable,
+									[$style['activeDrop']]: activeDrop,
+								}"
+								@keydown.stop="onKeyDown"
+							>
+								<n8n-input
+									v-if="isValueExpression || droppable || forceShowExpression"
+									type="text"
+									:size="inputSize"
+									:value="activeDrop || forceShowExpression ? '' : expressionDisplayValue"
+									:title="displayTitle"
+									@keydown.stop
+									ref="input"
+								/>
+								<n8n-input
+									v-else
+									:class="{[$style.selectInput]: isListMode}"
+									:size="inputSize"
+									:value="valueToDislay"
+									:disabled="isReadOnly"
+									:readonly="isListMode"
+									:title="displayTitle"
+									:placeholder="inputPlaceholder"
+									type="text"
+									ref="input"
+									@input="onInputChange"
+									@focus="onInputFocus"
+									@blur="onInputBlur"
+								>
+									<div
+										v-if="isListMode"
+										slot="suffix"
+										:class="$style['list-mode-icon-container']"
+									>
+										<i
+											:class="{
+												['el-input__icon']: true,
+												['el-icon-arrow-down']: true,
+												[$style['select-icon']]: true,
+												[$style['is-reverse']]: showResourceDropdown,
+											}"
+										></i>
+									</div>
+								</n8n-input>
+							</div>
+						</template>
+					</DraggableTarget>
+					<parameter-issues
+						v-if="resourceIssues && resourceIssues.length"
+						:issues="resourceIssues"
+					/>
+					<div v-else-if="urlValue">
+						<n8n-icon-button
+							:title="$locale.baseText('resourceLocator.openResource')"
+							icon="external-link-alt"
+							:text="true"
+							type="tertiary"
+							@click.stop="openResource(urlValue)"
+						/>
+					</div>
+				</div>
+			</div>
+		</ResourceLocatorDropdown>
+		<parameter-input-hint v-if="infoText" class="mt-4xs" :hint="infoText" />
+	</div>
+</template>
+
+<script lang="ts">
+import mixins from 'vue-typed-mixins';
+
+import {
+	ILoadOptions,
+	INode,
+	INodeCredentials,
+	INodeParameterResourceLocator,
+	INodeParameters,
+	INodeProperties,
+	INodePropertyMode,
+	INodeTypeDescription,
+	IResourceLocatorResult,
+} from 'n8n-workflow';
+import {
+	getParameterModeLabel,
+	hasOnlyListMode,
+	validateResourceLocatorParameter,
+} from './helpers';
+
+import DraggableTarget from '@/components/DraggableTarget.vue';
+import ExpressionEdit from '@/components/ExpressionEdit.vue';
+import ParameterIssues from '@/components/ParameterIssues.vue';
+import ParameterInputHint from '@/components/ParameterInputHint.vue';
+import ResourceLocatorDropdown from './ResourceLocatorDropdown.vue';
+import Vue, { PropType } from 'vue';
+import { INodeUi, IResourceLocatorReqParams, IResourceLocatorResponse } from '@/Interface';
+import { debounceHelper } from '../mixins/debounce';
+import stringify from 'fast-json-stable-stringify';
+import { workflowHelpers } from '../mixins/workflowHelpers';
+import { nodeHelpers } from '../mixins/nodeHelpers';
+
+interface IResourceLocatorQuery {
+	results: IResourceLocatorResult[];
+	nextPageToken: string | number | null;
+	error: boolean;
+	loading: boolean;
+}
+
+export default mixins(debounceHelper, workflowHelpers, nodeHelpers).extend({
+	name: 'ResourceLocator',
+	components: {
+		DraggableTarget,
+		ExpressionEdit,
+		ParameterIssues,
+		ParameterInputHint,
+		ResourceLocatorDropdown,
+	},
+	props: {
+		parameter: {
+			type: Object as PropType<INodeProperties>,
+			required: true,
+		},
+		value: {
+			type: Object as PropType<INodeParameterResourceLocator | undefined>,
+		},
+		mode: {
+			type: String,
+			default: '',
+		},
+		inputSize: {
+			type: String,
+			default: 'small',
+			validator: (size) => {
+				return ['mini', 'small', 'medium', 'large', 'xlarge'].includes(size);
+			},
+		},
+		parameterIssues: {
+			type: Array as PropType<string[]>,
+			default() {
+				return [];
+			},
+		},
+		displayValue: {
+			type: String,
+			default: '',
+		},
+		displayTitle: {
+			type: String,
+			default: '',
+		},
+		expressionDisplayValue: {
+			type: String,
+			default: '',
+		},
+		parameterInputClasses: {
+			type: Object,
+			default() {
+				return {};
+			},
+		},
+		isReadOnly: {
+			type: Boolean,
+			default: false,
+		},
+		forceShowExpression: {
+			type: Boolean,
+			default: false,
+		},
+		isValueExpression: {
+			type: Boolean,
+			default: false,
+		},
+		expressionEditDialogVisible: {
+			type: Boolean,
+			default: false,
+		},
+		node: {
+			type: Object as PropType<INode>,
+		},
+		path: {
+			type: String,
+		},
+		loadOptionsMethod: {
+			type: String,
+		},
+	},
+	data() {
+		return {
+			resourceIssues: [] as string[],
+			showResourceDropdown: false,
+			searchFilter: '',
+			cachedResponses: {} as { [key: string]: IResourceLocatorQuery },
+			hasCompletedASearch: false,
+		};
+	},
+	computed: {
+		selectedMode(): string {
+			if (!this.value) {
+				return this.parameter.modes? this.parameter.modes[0].name : '';
+			}
+
+			return this.value.mode;
+		},
+		isListMode(): boolean {
+			return this.selectedMode === 'list';
+		},
+		hasCredential(): boolean {
+			const node = this.$store.getters.activeNode as INodeUi | null;
+			if (!node) {
+				return false;
+			}
+			return !!(node && node.credentials && Object.keys(node.credentials).length === 1);
+		},
+		inputPlaceholder(): string {
+			if (this.currentMode.placeholder) {
+				return this.currentMode.placeholder;
+			}
+			const defaults: { [key: string]: string } = {
+				list: this.$locale.baseText('resourceLocator.listPlaceholder'),
+				url: this.$locale.baseText('resourceLocator.urlPlaceholder'),
+			};
+
+			return defaults[this.selectedMode] || '';
+		},
+		infoText(): string {
+			return this.currentMode.hint ? this.currentMode.hint : this.parameter.description || '';
+		},
+		currentMode(): INodePropertyMode {
+			return this.findModeByName(this.selectedMode) || ({} as INodePropertyMode);
+		},
+		hasMultipleModes(): boolean {
+			return this.parameter.modes && this.parameter.modes.length > 1 ? true : false;
+		},
+		hasOnlyListMode(): boolean {
+			return hasOnlyListMode(this.parameter);
+		},
+		inputClasses(): { [c: string]: boolean } {
+			const classes = {
+				...this.parameterInputClasses,
+				[this.$style['list-mode-input-container']]: this.isListMode,
+			};
+			if (this.resourceIssues.length) {
+				classes['has-issues'] = true;
+			}
+			return classes;
+		},
+		valueToDislay(): string {
+			if (this.isListMode) {
+				return (this.value && this.value.cachedResultName) || this.displayValue;
+			}
+
+			return this.displayValue;
+		},
+		urlValue(): string | null {
+			if (this.isListMode) {
+				return (this.value && this.value.cachedResultUrl) || null;
+			}
+
+			return null;
+		},
+		currentRequestParams(): {
+			parameters: INodeParameters;
+			credentials: INodeCredentials | undefined;
+			filter: string;
+			} {
+			return {
+				parameters: this.node.parameters,
+				credentials: this.node.credentials,
+				filter: this.searchFilter,
+			};
+		},
+		currentRequestKey(): string {
+			const cacheKeys = {...this.currentRequestParams};
+			cacheKeys.parameters = Object.keys(this.node ? this.node.parameters : {}).reduce((accu: INodeParameters, param) => {
+				if (param !== this.parameter.name && this.node && this.node.parameters) {
+					accu[param] = this.node.parameters[param];
+				}
+
+				return accu;
+			}, {});
+			return stringify(cacheKeys);
+		},
+		currentResponse(): IResourceLocatorQuery | null {
+			return this.cachedResponses[this.currentRequestKey] || null;
+		},
+		currentQueryResults(): IResourceLocatorResult[] {
+			return this.currentResponse ? this.currentResponse.results : [];
+		},
+		currentQueryHasMore(): boolean {
+			return !!(this.currentResponse && this.currentResponse.nextPageToken);
+		},
+		currentQueryLoading(): boolean {
+			if (this.requiresSearchFilter && this.searchFilter === '') {
+				return false;
+			}
+			if (!this.currentResponse) {
+				return true;
+			}
+			return !!(this.currentResponse && this.currentResponse.loading);
+		},
+		currentQueryError(): boolean {
+			return !!(this.currentResponse && this.currentResponse.error);
+		},
+		isSearcabale(): boolean {
+			return !!this.getPropertyArgument(this.currentMode, 'searchable');
+		},
+		requiresSearchFilter(): boolean {
+			return !!this.getPropertyArgument(this.currentMode, 'searchFilterRequired');
+		},
+	},
+	watch: {
+		currentQueryError(curr: boolean, prev: boolean) {
+			if (this.showResourceDropdown && curr && !prev) {
+				const input = this.$refs.input;
+				if (input) {
+					(input as HTMLElement).focus();
+				}
+			}
+		},
+		parameterIssues() {
+			this.validate();
+		},
+		value() {
+			this.validate();
+		},
+		isValueExpression(newValue: boolean) {
+			if (newValue === true) {
+				this.switchFromListMode();
+			}
+		},
+	},
+	mounted() {
+		this.$on('refreshList', this.refreshList);
+	},
+	methods: {
+		refreshList() {
+			this.cachedResponses = {};
+			this.trackEvent('User refreshed resource locator list');
+		},
+		onKeyDown(e: MouseEvent) {
+			const dropdown = this.$refs.dropdown;
+			if (dropdown && this.showResourceDropdown && !this.isSearcabale) {
+				(dropdown as Vue).$emit('keyDown', e);
+			}
+		},
+		openResource(url: string) {
+			window.open(url, '_blank');
+			this.trackEvent('User clicked resource locator link');
+		},
+		getPropertyArgument(
+			parameter: INodePropertyMode,
+			argumentName: string,
+		): string | number | boolean | undefined {
+			if (parameter.typeOptions === undefined) {
+				return undefined;
+			}
+
+			// @ts-ignore
+			if (parameter.typeOptions[argumentName] === undefined) {
+				return undefined;
+			}
+
+			// @ts-ignore
+			return parameter.typeOptions[argumentName];
+		},
+		openCredential(): void {
+			const node = this.$store.getters.activeNode as INodeUi | null;
+			if (!node || !node.credentials) {
+				return;
+			}
+			const credentialKey = Object.keys(node.credentials)[0];
+			if (!credentialKey) {
+				return;
+			}
+			const id = node.credentials[credentialKey].id;
+			this.$store.dispatch('ui/openExisitngCredential', { id });
+		},
+		validate(): void {
+			const valueToValidate = this.displayValue
+				? this.displayValue.toString()
+				: this.value
+					? this.value.toString()
+					: '';
+			const validationErrors: string[] = validateResourceLocatorParameter(
+				valueToValidate,
+				this.currentMode,
+			);
+			this.resourceIssues = this.parameterIssues.concat(validationErrors);
+		},
+		findModeByName(name: string): INodePropertyMode | null {
+			if (this.parameter.modes) {
+				return this.parameter.modes.find((mode: INodePropertyMode) => mode.name === name) || null;
+			}
+			return null;
+		},
+		getModeLabel(name: string): string | null {
+			return getParameterModeLabel(name);
+		},
+		onInputChange(value: string): void {
+			const params: INodeParameterResourceLocator = { value, mode: this.selectedMode };
+			if (this.isListMode) {
+				const resource = this.currentQueryResults.find((resource) => resource.value === value);
+				if (resource && resource.name) {
+					params.cachedResultName = resource.name;
+				}
+
+				if (resource && resource.url) {
+					params.cachedResultUrl = resource.url;
+				}
+			}
+			this.$emit('valueChanged', params);
+		},
+		onModeSelected(value: string): void {
+			this.validate();
+			if (value === 'list') {
+				this.$emit('valueChanged', { value: '', mode: 'list' });
+				this.$emit('modeChanged', { value: '', mode: value });
+			} else if (value === 'url' && this.value && this.value.cachedResultUrl) {
+				this.$emit('modeChanged', { mode: value, value: this.value.cachedResultUrl });
+			} else if (this.value){
+				this.$emit('modeChanged', { mode: value, value: this.value.value });
+			}
+
+			this.trackEvent('User changed resource locator mode', { mode: value });
+		},
+		trackEvent(event: string, params?: {[key: string]: string}): void {
+			this.$telemetry.track(event, {
+				instance_id: this.$store.getters.instanceId,
+				workflow_id: this.$store.getters.workflowId,
+				node_type: this.node && this.node.type,
+				resource: this.node && this.node.parameters && this.node.parameters.resource,
+				operation: this.node && this.node.parameters && this.node.parameters.operation,
+				field_name: this.parameter.name,
+				...params,
+			});
+		},
+		onDrop(data: string) {
+			this.switchFromListMode();
+			this.$emit('drop', data);
+		},
+		onSearchFilter(filter: string) {
+			this.searchFilter = filter;
+			this.loadResourcesDeboucned();
+		},
+		async loadInitialResources(): Promise<void> {
+			if (!this.currentResponse || (this.currentResponse && this.currentResponse.error)) {
+				this.searchFilter = '';
+				this.loadResources();
+			}
+		},
+		loadResourcesDeboucned() {
+			this.callDebounced('loadResources', { debounceTime: 1000, trailing: true });
+		},
+		setResponse(paramsKey: string, props: Partial<IResourceLocatorQuery>) {
+			this.cachedResponses = {
+				...this.cachedResponses,
+				[paramsKey]: { ...this.cachedResponses[paramsKey], ...props },
+			};
+		},
+		async loadResources() {
+			const params = this.currentRequestParams;
+			const paramsKey = this.currentRequestKey;
+			const cachedResponse = this.cachedResponses[paramsKey];
+
+			if (this.requiresSearchFilter && !params.filter) {
+				return;
+			}
+
+			let paginationToken: null | string | number = null;
+
+			try {
+				if (cachedResponse) {
+					const nextPageToken = cachedResponse.nextPageToken;
+					if (nextPageToken) {
+						paginationToken = nextPageToken;
+						this.setResponse(paramsKey, { loading: true });
+					} else if (cachedResponse.error) {
+						this.setResponse(paramsKey, { error: false, loading: true });
+					} else {
+						return; // end of results
+					}
+				} else {
+					this.setResponse(paramsKey, {
+						loading: true,
+						error: false,
+						results: [],
+						nextPageToken: null,
+					});
+				}
+
+				const resolvedNodeParameters = this.resolveParameter(params.parameters) as INodeParameters;
+				const loadOptionsMethod = this.getPropertyArgument(this.currentMode, 'searchListMethod') as
+					| string
+					| undefined;
+				const searchList = this.getPropertyArgument(this.currentMode, 'searchList') as
+					| ILoadOptions
+					| undefined;
+
+				const requestParams: IResourceLocatorReqParams = {
+					nodeTypeAndVersion: {
+						name: this.node.type,
+						version: this.node.typeVersion,
+					},
+					path: this.path,
+					methodName: loadOptionsMethod,
+					searchList,
+					currentNodeParameters: resolvedNodeParameters,
+					credentials: this.node.credentials,
+					...(params.filter ? { filter: params.filter } : {}),
+					...(paginationToken ? { paginationToken } : {}),
+				};
+
+				const response: IResourceLocatorResponse = await this.$store.dispatch(
+					'nodeTypes/getResourceLocatorResults',
+					requestParams,
+				);
+
+				this.setResponse(paramsKey, {
+					results: (cachedResponse ? cachedResponse.results : []).concat(response.results),
+					nextPageToken: response.paginationToken || null,
+					loading: false,
+					error: false,
+				});
+
+				if (params.filter && !this.hasCompletedASearch) {
+					this.hasCompletedASearch = true;
+					this.trackEvent('User searched resource locator list');
+				}
+			} catch (e) {
+				this.setResponse(paramsKey, {
+					loading: false,
+					error: true,
+				});
+			}
+		},
+		onInputFocus(): void {
+			if (!this.isListMode || this.showResourceDropdown) {
+				return;
+			}
+
+			this.loadInitialResources();
+			this.showResourceDropdown = true;
+		},
+		switchFromListMode(): void {
+			if (this.isListMode && this.parameter.modes && this.parameter.modes.length > 1) {
+				let mode = this.findModeByName('id');
+				if (!mode) {
+					mode = this.parameter.modes.filter((mode) => mode.name !== 'list')[0];
+				}
+
+				if (mode) {
+					this.$emit('modeChanged', { value: (this.value? this.value.value: ''), mode: mode.name });
+				}
+			}
+		},
+		onDropdownHide() {
+			if (!this.currentQueryError) {
+				this.showResourceDropdown = false;
+			}
+		},
+		onListItemSelected(value: string) {
+			this.onInputChange(value);
+			this.showResourceDropdown = false;
+		},
+		onInputBlur() {
+			if (!this.isSearcabale || this.currentQueryError) {
+				this.showResourceDropdown = false;
+			}
+		},
+	},
+});
+</script>
+
+<style lang="scss" module>
+:root {
+	--mode-selector-width: 92px;
+}
+
+.mode-selector {
+	--input-background-color: initial;
+	--input-font-color: initial;
+	--input-border-color: initial;
+	flex-basis: var(--mode-selector-width);
+
+	input {
+		border-radius: var(--border-radius-base) 0 0 var(--border-radius-base);
+		border-right: none;
+		overflow: hidden;
+
+		&:focus {
+			border-right: none;
+		}
+
+		&:disabled {
+			cursor: not-allowed !important;
+		}
+	}
+}
+
+.resource-locator {
+	display: flex;
+	flex-wrap: wrap;
+
+	.input-container {
+		display: flex;
+		align-items: center;
+		width: 100%;
+
+		div:first-child {
+			display: flex;
+			flex-grow: 1;
+		}
+
+		&:hover .edit-window-button {
+			display: inline;
+		}
+	}
+
+	&.multiple-modes {
+		.input-container {
+			display: flex;
+			align-items: center;
+			flex-basis: calc(100% - var(--mode-selector-width));
+			flex-grow: 1;
+
+			input {
+				border-radius: 0 var(--border-radius-base) var(--border-radius-base) 0;
+			}
+		}
+	}
+}
+
+.edit-window-button {
+	display: none;
+}
+
+.expand-input-icon-container {
+	display: flex;
+	height: 100%;
+	align-items: center;
+}
+
+.has-issues {
+	--input-border-color: var(--color-danger);
+}
+
+.droppable {
+	--input-border-color: var(--color-secondary-tint-1);
+	--input-background-color: var(--color-secondary-tint-2);
+	--input-border-style: dashed;
+}
+
+.activeDrop {
+	--input-border-color: var(--color-success);
+	--input-background-color: var(--color-success-tint-2);
+	--input-border-style: solid;
+
+	textarea,
+	input {
+		cursor: grabbing !important;
+	}
+}
+
+.selectInput input {
+	padding-right: 30px !important;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.select-icon {
+	cursor: pointer;
+	font-size: 14px;
+	transition: transform 0.3s, -webkit-transform 0.3s;
+	-webkit-transform: rotateZ(0);
+	transform: rotateZ(0);
+
+	&.is-reverse {
+		-webkit-transform: rotateZ(180deg);
+		transform: rotateZ(180deg);
+	}
+}
+
+.list-mode-input-container * {
+	cursor: pointer;
+}
+
+.error {
+	max-width: 170px;
+	word-break: normal;
+	text-align: center;
+}
+</style>
