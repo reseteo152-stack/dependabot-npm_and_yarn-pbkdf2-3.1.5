@@ -1,0 +1,13 @@
+{
+	"recommendations": [
+		"streetsidesoftware.code-spell-checker",
+		"dangmai.workspace-default-settings",
+		"dbaeumer.vscode-eslint",
+		"EditorConfig.EditorConfig",
+		"esbenp.prettier-vscode",
+		"firsttris.vscode-jest-runner",
+		"ms-vscode.vscode-js-profile-flame",
+		"Vue.vscode-typescript-vue-plugin",
+		"yzhang.markdown-all-in-one"
+	]
+}
