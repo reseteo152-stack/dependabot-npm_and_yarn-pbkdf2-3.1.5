@@ -1,0 +1,224 @@
+# n8n Breaking Changes
+
+This list shows all the versions which include breaking changes and how to upgrade.
+
+
+## 0.68.0
+
+### What changed?
+
+To make it easier to use the data which the Slack-Node outputs we no longer return the whole
+object the Slack-API returns if the only other property is `"ok": true`. In this case it returns
+now directly the data under "channel".
+
+### When is action necessary?
+
+When you currently use the Slack-Node with Operations Channel -> Create and you use
+any of the data the node outputs.
+
+### How to upgrade:
+
+All values that get referenced which were before under the property "channel" are now on the main level.
+This means that these expressions have to get adjusted.
+
+Meaning if the expression used before was:
+```
+{{ $node["Slack"].data["channel"]["id"] }}
+```
+it has to get changed to:
+```
+{{ $node["Slack"].data["id"] }}
+```
+
+
+## 0.67.0
+
+### What changed?
+
+The names of the following nodes were not set correctly and got fixed:
+  - AMQP Sender
+  - Bitbucket-Trigger
+  - Coda
+  - Eventbrite-Trigger
+  - Flow
+  - Flow-Trigger
+  - Gumroad-Trigger
+  - Jira
+  - Mailchimp-Trigger
+  - PayPal Trigger
+  - Read PDF
+  - Rocketchat
+  - Shopify
+  - Shopify-Trigger
+  - Stripe-Trigger
+  - Toggl-Trigger
+
+### When is action necessary?
+
+If any of the nodes mentioned above, are used in any of your workflows.
+
+### How to upgrade:
+
+For the nodes mentioned above, you'll need to give them access to the credentials again by opening the credentials and moving them from "No Access" to "Access". After you've done that, there are two ways to upgrade the workflows and to make them work in the new version:
+
+**Simple**
+
+  - Note down the settings of the nodes before upgrading
+  - After upgrading, delete the nodes mentioned above from your workflow, and recreate them
+
+**Advanced**
+
+After upgrading, select the whole workflow in the editor, copy it, and paste it into a text editor. In the JSON, change the node types manually by replacing the values for "type" as follows:
+  - "n8n-nodes-base.amqpSender" -> "n8n-nodes-base.amqp"
+  - "n8n-nodes-base.bitbucket" -> "n8n-nodes-base.bitbucketTrigger"
+  - "n8n-nodes-base.Coda" -> "n8n-nodes-base.coda"
+  - "n8n-nodes-base.eventbrite" -> "n8n-nodes-base.eventbriteTrigger"
+  - "n8n-nodes-base.Flow" -> "n8n-nodes-base.flow"
+  - "n8n-nodes-base.flow" -> "n8n-nodes-base.flowTrigger"
+  - "n8n-nodes-base.gumroad" -> "n8n-nodes-base.gumroadTrigger"
+  - "n8n-nodes-base.Jira Software Cloud" -> "n8n-nodes-base.jira"
+  - "n8n-nodes-base.Mailchimp" -> "n8n-nodes-base.mailchimpTrigger"
+  - "n8n-nodes-base.PayPal" -> "n8n-nodes-base.payPalTrigger"
+  - "n8n-nodes-base.Read PDF" -> "n8n-nodes-base.readPDF"
+  - "n8n-nodes-base.Rocketchat" -> "n8n-nodes-base.rocketchat"
+  - "n8n-nodes-base.shopify" -> "n8n-nodes-base.shopifyTrigger"
+  - "n8n-nodes-base.shopifyNode" -> "n8n-nodes-base.shopify"
+  - "n8n-nodes-base.stripe" -> "n8n-nodes-base.stripeTrigger"
+  - "n8n-nodes-base.toggl" -> "n8n-nodes-base.togglTrigger"
+
+Then delete all existing nodes, and then paste the changed JSON directly into n8n. It should then recreate all the nodes and connections again, this time with working nodes.
+
+
+## 0.62.0
+
+### What changed?
+
+The function "evaluateExpression(...)" got renamed to "$evaluateExpression()"
+in Function and FunctionItem Nodes to simplify code and to normalize function
+names.
+
+### When is action necessary?
+
+If "evaluateExpression(...)" gets used in any Function or FunctionItem Node.
+
+### How to upgrade:
+
+Simply replace the "evaluateExpression(...)" with "$evaluateExpression(...)".
+
+
+## 0.52.0
+
+### What changed?
+
+To make sure that all nodes work similarly, to allow to easily use the value
+from other parts of the workflow and to be able to construct the source-date
+manually in an expression, the node had to be changed. Instead of getting the
+source-date directly from the flow the value has now to be manually set via
+an expression.
+
+### When is action necessary?
+
+If you currently use "Date & Time"-Nodes.
+
+### How to upgrade:
+
+Open the "Date & Time"-Nodes and reference the date that should be converted
+via an expression. Also, set the "Property Name" to the name of the property the
+converted date should be set on.
+
+
+## 0.37.0
+
+### What changed?
+
+To make it possible to support also Rocketchat on-premise the credentials had to be changed.
+The `subdomain` parameter had to get renamed to `domain`.
+
+### When is action necessary?
+
+When you currently use the Rocketchat-Node.
+
+### How to upgrade:
+
+Open the Rocketchat credentials and fill the parameter `domain`. If you had previously the
+subdomain "example" set you have to set now "https://example.rocket.chat".
+
+
+## 0.19.0
+
+### What changed?
+
+The node "Read File From Url" got removed as its functionality got added to
+"HTTP Request" node where it belongs.
+
+### When is action necessary?
+
+If the "Read File From Url" node gets used in any workflow.
+
+### How to upgrade:
+
+After upgrading open all workflows which contain a "Read File From Url" node.
+They will have a "?" as icon as they are not known anymore. Create a new
+"HTTP Request" node to replace the old one and add the same URL as the previous
+node had (in case you do not know it anymore you can select the old node, copy
+it and paste it in a text-editor, it will display all the data the node
+contained). Then set the "Response Format" to "File". Everything will then
+function again like before.
+
+
+----------------------------
+
+
+### What changed?
+
+When "HTTP Request" property "Response Format" was set to "String" it did save
+the data by default in the property "response". In the new version that can now
+be configured. The default value got also changed from "response" to "data" to
+match other nodes with similar functionality.
+
+### When is action necessary?
+
+When "HTTP Request" nodes get used which have "Response Format" set to "String".
+
+### How to upgrade:
+
+After upgrading open all workflows which contain the concerning Nodes and set
+"Binary Property" to "response".
+
+
+## 0.18.0
+
+### What changed?
+
+Because of a typo very often `reponse` instead of `response` got used in code. So also on the Webhook-Node. Its parameter `reponseMode` had to be renamed to correct spelling `responseMode`.
+
+### When is action necessary?
+
+When Webhook-Nodes get used which have "Response Mode" set to "Last Node".
+
+### How to upgrade:
+
+After upgrading open all workflows which contain the concerning Webhook-Nodes and set "Response Mode" again manually to "Last Node".
+
+
+----------------------------
+
+### What changed?
+
+Because the CLI library n8n used was not maintained anymore and included
+packages with security vulnerabilities we had to switch to a different one.
+
+### When is action necessary?
+
+When you currently start n8n in your setup directly via its JavaScript file.
+For example like this:
+```
+/usr/local/bin/node ./dist/index.js start
+```
+
+### How to upgrade:
+
+Change the path to its new location:
+```
+/usr/local/bin/node bin/n8n start
+```
