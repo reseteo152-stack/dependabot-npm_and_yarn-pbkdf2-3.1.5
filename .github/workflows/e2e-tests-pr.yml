@@ -1,0 +1,42 @@
+name: PR E2E (skip with label skip-e2e)
+
+on:
+  pull_request_review:
+    types: [submitted]
+    branch:
+      - 'master'
+
+jobs:
+  cancel-previous-runs:
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-e2e') }}
+
+    timeout-minutes: 30
+    name: 'Run E2E tests'
+
+    strategy:
+      matrix:
+        node-version: [16.x]
+
+    steps:
+      - name: 'Cancel previous runs'
+        uses: styfle/cancel-workflow-action@0.9.0
+        with:
+          access_token: ${{ github.token }}
+
+      - name: 'Cancel if PR is not approved'
+        if: github.event.review.state != 'approved'
+        uses: andymckay/cancel-action@0.2
+
+  e2e-node-16:
+    name: Electron - Node 16
+    # TODO: Change to master branch before merge
+    uses: n8n-io/n8n/.github/workflows/e2e-reusable.yml@parallel_e2e_sorry_cy
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-e2e') }}
+    with:
+      branch: ${{ github.event.inputs.branch || 'parallel_e2e_sorry_cy' }}
+      user: ${{ github.event.inputs.user || 'PR User' }}
+      spec: ${{ github.event.inputs.spec || 'e2e/*' }}
+      run-env: base:16.18.1
+    secrets:
+      CURRENTS_RECORD_KEY: ${{ secrets.CURRENTS_RECORD_KEY }}

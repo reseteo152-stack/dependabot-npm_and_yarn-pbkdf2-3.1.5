@@ -1,0 +1,137 @@
+name: Reusable e2e workflow
+
+on:
+  workflow_call:
+    inputs:
+      branch:
+        description: 'GitHub branch to test.'
+        required: false
+        type: string
+        default: 'parallel_e2e_sorry_cy'
+      user:
+        description: 'User who kicked this off.'
+        required: false
+        type: string
+        default: 'schedule'
+      spec:
+        description: 'Specify specs.'
+        required: false
+        default: 'e2e/*'
+        type: string
+      run-env:
+        description: 'Node env version to run tests with.'
+        required: false
+        default: 'browsers:node16.18.0-chrome90-ff88'
+        type: string
+      record:
+        description: 'Record test run.'
+        required: false
+        default: true
+        type: boolean
+      parallel:
+        description: 'Run tests in parallel.'
+        required: false
+        default: true
+        type: boolean
+      containers:
+        description: 'Number of containers to run tests in.'
+        required: false
+        default: '[1, 2, 3, 4, 5, 6]'
+        type: string
+    secrets:
+      CURRENTS_RECORD_KEY:
+        description: 'Currents record key.'
+        required: true
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    container:
+      image: cypress/${{ inputs.run-env }}
+      options: --user 1001
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          repository: n8n-io/n8n
+          ref: ${{ inputs.branch }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2.2.4
+        with:
+          run_install: true
+
+      - name: Echo spec input
+        run: echo ${{ inputs.spec }}
+
+      - name: Cache pnpm modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            /github/home/.cache
+            /github/home/.pnpm-store
+            ./node_modules
+            ./packages
+          key: ${{ github.sha	}}-${{ inputs.run-env }}-e2e-modules
+
+      - name: Cypress build
+        uses: cypress-io/github-action@v5
+        with:
+          # Disable running of tests within install job
+          runTests: false
+          install: false
+          build: pnpm build
+
+      - name: Cypress install
+        run: pnpm cypress:install
+
+  testing:
+    name: "Spec: ${{ inputs.spec }}"
+    runs-on: ubuntu-latest
+    container:
+      image: cypress/${{ inputs.run-env }}
+      options: --user 1001
+    needs: install
+    strategy:
+      fail-fast: false
+      matrix:
+        containers: ${{ fromJSON(inputs.containers) }}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          repository: n8n-io/n8n
+          ref: ${{ inputs.branch }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2.2.4
+
+      - name: Restore cached pnpm modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            /github/home/.cache
+            /github/home/.pnpm-store
+            ./node_modules
+            ./packages
+          key: ${{ github.sha	}}-${{ inputs.run-env }}-e2e-modules
+
+      - name: Cypress run
+        uses: cypress-io/github-action@v5
+        with:
+          install: false
+          start: pnpm start
+          wait-on: 'http://localhost:5678'
+          wait-on-timeout: 120 #
+          record: ${{ inputs.record }}
+          parallel: ${{ inputs.parallel }}
+          # We have to provide custom ci-build-id key to make sure that this workflow could be run multiple times
+          # in the same parent workflow
+          # ci-build-id: '${{ github.sha }}-${{ github.workflow }}-${{ github.event_name }}-${{ inputs.run-env }}-e2e'
+          # spec: "/__w/n8n/n8n/cypress/${{ inputs.spec }}"
+          config-file: /__w/n8n/n8n/cypress.config.js
+          command: pnpm exec currents run --record --parallel --key ${{ secrets.CURRENTS_RECORD_KEY }} --ci-build-id "${{ github.sha }}-${{ github.workflow }}-${{ github.event_name }}-${{ inputs.run-env }}-e2e --spec /__w/n8n/n8n/cypress/${{ inputs.spec }}"
+        env:
+          CURRENTS_RECORD_KEY: ${{ secrets.CURRENTS_RECORD_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CYPRESS_N8N_E2E_TESTS: true
+          E2E_TEST: true
+          COMMIT_INFO_MESSAGE: 🌳 ${{ inputs.branch }} 🖥️ ${{ inputs.run-env }} 🐳 ${{ matrix.containers }} 🤖 ${{ inputs.user }} 🗃️ ${{ inputs.spec }}
