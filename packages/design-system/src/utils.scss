@@ -1,0 +1,22 @@
+@function lightness($h, $s, $l, $lightness) {
+	@return hsl(var(#{$h}), var(#{$s}), calc(var(#{$l}) + #{$lightness}));
+}
+
+@function saturation($h, $s, $l, $saturation) {
+	@return hsl(var(#{$h}), calc(var(#{$s}) + #{$saturation}), var(#{$l}));
+}
+
+@function joinVarName($list) {
+  $name: '--' + 'el';
+  @each $item in $list {
+    @if $item != '' {
+      $name: $name + '-' + $item;
+    }
+  }
+  @return $name;
+}
+
+// getCssVarName('button', 'text-color') => '--el-button-text-color'
+@function getCssVarName($args...) {
+  @return joinVarName($args);
+}
