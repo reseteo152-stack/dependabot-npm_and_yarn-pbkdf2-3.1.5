@@ -1,0 +1,27 @@
+{
+	"extends": "../../tsconfig.json",
+	"compilerOptions": {
+		"rootDir": ".",
+		"outDir": "dist",
+		"target": "esnext",
+		"module": "esnext",
+		"skipLibCheck": true,
+		"allowJs": true,
+		"importHelpers": true,
+		"allowSyntheticDefaultImports": true,
+		"baseUrl": ".",
+		"typeRoots": [
+			"@types",
+			"element-ui/types"
+		],
+		"types": ["webpack-env", "jest"],
+		"paths": {
+			"@/*": ["src/*"]
+		},
+		"lib": ["esnext", "dom", "dom.iterable", "scripthost"],
+		// TODO: remove all options below this line
+		"noUnusedLocals": false,
+		"useUnknownInCatchVariables": false
+	},
+	"include": ["src/**/*.ts", "src/**/*.vue"]
+}
