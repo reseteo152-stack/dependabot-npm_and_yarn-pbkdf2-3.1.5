@@ -1,0 +1,37 @@
+name: Check PR title
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - synchronize
+
+jobs:
+  check-pr-title:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate PR title
+        id: validate_pr_title
+        uses: ivov/validate-n8n-pull-request-title@v1
+
+      - name: Post validation issue comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        if: always()
+        with:
+          header: pr_title_failed_validation
+          message: |
+            Thank you for your contribution!
+            PR titles in this repo follow our version of the Conventional Commits spec.
+            This allows us to automatically generate the changelog for the next release.
+            Therefore, we ask you to adjust your PR title to solve the issue(s) below:
+
+            ${{ steps.validate_pr_title.outputs.validation_issues }}
+
+      - name: Remove validation issue comment
+        if: ${{ steps.validate_pr_title.outputs.validation_issues == null }}
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: pr_title_failed_validation
+          delete: true
